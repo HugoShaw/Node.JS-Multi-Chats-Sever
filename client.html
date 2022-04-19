@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="en">
+   <head>
+        <title>Multi-room Chat Server</title>
+        <script src="/socket.io/socket.io.js"></script>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <script type="text/javascript">
+
+            $(document).ready(function(){
+                // initialization
+                var socketio = io.connect();
+                let username;
+
+                $(".main-page").hide();
+                $(".error-message").hide();
+
+                // login main page
+                $("#login").on("click", login);
+                function login(event) {
+                    // send username
+                    username = $("#username").val();
+                    console.log(username);
+                    socketio.emit("create_username", {newUser: username}, (data) => {
+                        if (data.success) {
+                            $(".error-message").text("");
+                            $(".error-message").hide();
+                            // clear username input
+                            $("#username").text("");
+                            $(".initialize-chat-server").hide();
+                            // open the main page for username to chat
+                            $(".main-page").show();
+                            
+                            // TODO: hide other containers
+                            $(".create-chat-room-container").hide();
+                            $(".display-all-rooms").hide();
+                            $(".chat-room-container").hide();
+                            $(".join-in-public-room-container").hide();
+                            $(".join-in-private-room-container").hide();
+                            $(".receive-a-private-message-container").hide();
+
+                            // Pass username into the main page
+                            $("h2").append($(`<strong>${username}</strong>`));
+
+                        } else {
+                            // show error message if it does receive any data
+                            $(".error-message").show();
+                            $(".error-message").text(data.message);
+                        }
+                    });
+                }
+
+                // });
+                /***********************************************\
+                 *                                             *
+                 *                                             *
+                 *  Administration of user created chat rooms  *
+                 *                                             *
+                 *                                             *
+                 \**********************************************/
+
+                // 1. Users can create chat rooms with an arbitrary room name
+                // 4. A private room can be created that is password protected
+
+                // creat room button:
+                // room name
+                $("#create-chat-room").on("click", createChatRoom);
+                function createChatRoom(event) {
+                    // open create-chat-room-container
+                    $(".create-chat-room-container").show();
+                    $(".new-room-password").hide();
+
+                    // when click radio button it will show the password or not 
+                    $("input:radio[name='create-private-room']").change(function(){
+                        if ($(this).val() == "true") {
+                            $(".new-room-password").show();
+                        } else {
+                            $(".new-room-password").hide();
+                        }
+                    })
+
+                    // create a room
+                    // if there is a password protected, create a private rooms
+                    // if there is no password, create a public rooms
+                    $("#create-new-room-btn").on("click",function(event) {
+                        // send data to the server
+                        const newRoomName = $("#new-room-name").val();
+                        username = $("h2 strong").text();
+                        console.log(username+"is creating a new room");
+
+                        let message;
+                        if ($("#create-private").is(":checked")){
+                            const newRoomPswd = $("#create-password").val();
+                            message = {creator: username, newRoom: newRoomName, private: true, password: newRoomPswd};
+                        }else{
+                            message = {creator: username, newRoom: newRoomName, private: false};
+                        }
+                        console.log("creator: "+message.creator+" sending input data: "+message.newRoom+":"+message.private);
+                        // success: show a new room with the new name
+                        socketio.emit("create_room", message, (data) => {
+                            if (data.success){
+                                // we close the create room container
+                                $("#new-room-name").val("");
+                                $("#create-password").val("");
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+                                $("#not-create-private").attr("checked", true);
+                                $(".create-chat-room-container").hide();
+
+                                // we open the new chat room container
+                                $(".chat-room-container").show();
+                                $(".room-name").text(newRoomName);
+                            }else{
+                                $(".error-message").show();
+                                $(".error-message").text(data.message);
+                            }
+                        });
+                    });
+
+                    // cancel create a room
+                    $("#cancel-new-room-btn").on("click", function(event){
+                        // clear all input fields
+                        $("#new-room-name").val("");
+                        $("#create-password").val("");
+                        $("#not-create-private").attr("checked", true);
+                        // hide the container
+                        $(".create-chat-room-container").hide();
+                    });
+                }
+
+                // 2. Users can join an arbitrary chat room
+                // a: click the button to show all the available rooms
+                $("#display-all-rooms-btn").on("click", displayRooms);
+                function displayRooms(event) {
+                    $(".display-all-rooms").show();
+                    $(".display-all-private-rooms").hide();
+                    username = $("h2 strong").text();
+
+                    // show all available rooms
+                    console.log(username+" is requesting for all available rooms");
+                    socketio.emit("display_all_rooms", {requesterName: username}, (data) => {
+                        if (data.success) { // if server responded
+                            $(".error-message").text("");
+                            $(".error-message").hide();
+
+                            // show all available rooms
+                            const roomsData = data.message;
+                            for (const room of roomsData){
+                                let buttonID;
+                                // private room 
+                                if (room.roomCategory === "private") {
+                                    buttonID = "join-in-"+room.roomName;
+
+                                    $(".display-all-private-rooms").append(
+                                        $(`<button type='submit' id=${buttonID}>${room.roomName}</button>`)
+                                    );
+
+                                    $(`#${buttonID}`).on("click", joinPrivateRoom);
+                                }
+                                // public room 
+                                if (room.roomCategory === "public") {
+                                    buttonID = "join-in-"+room.roomName;
+
+                                    $(".display-all-public-rooms").append(
+                                        $(`<button type='submit' id=${buttonID}>${room.roomName}</button>`)
+                                    );
+
+                                    $(`#${buttonID}`).on("click", joinPublicRoom);
+                                }
+                            }
+  
+                        } else {
+                            console.log("unsuccessfully see the room");
+                            $(".error-message").show();
+                            $(".error-message").text(data.message);
+                        }
+                    });
+
+                    // radio control to see public or private rooms
+                    $("input:radio[name='all-rooms']").change(function(){
+                        if ($(this).val() == "private") {
+                            $(".display-all-private-rooms").show();
+                            $(".display-all-public-rooms").hide();
+                        } else {
+                            $(".display-all-private-rooms").hide();
+                            $(".display-all-public-rooms").show();
+                        }
+                    })
+
+                    // cancel button to control hide the containers
+                    $("#cancel-display-all-rooms").on("click", function(){
+                        $("#show-public").attr("checked", true);
+                        $("#show-private").attr("checked", false);
+                        $(".display-all-private-rooms").hide();
+                        $(".error-message").text("");
+                        $(".error-message").hide();
+                        $(".display-all-public-rooms").html("");
+                        $(".display-all-private-rooms").html("");
+                        $(".display-all-rooms").hide();
+                    })
+                }
+                
+                // join in the arbitrary rooms
+                // join in the arbitrary room should consider the ban list
+                // public rooms
+                // send user id in the room
+                function joinPublicRoom() {
+                    // obtain the public room name
+                    // console.log("joining in room: "+$(this).attr("value")+" | "+$(this).val());
+                    const roomName = $(this).text();
+                    username = $("h2 strong").text();
+                    console.log(username+" is joining in public room: "+roomName);
+                    
+                    // get room data from server
+                    socketio.emit("public_room_data", {requesterName: username, openRoom: roomName}, (data) => {
+                        if (data.success){
+                            $(".error-message").text("");
+                            $(".error-message").hide();
+
+                            const publicRoomData = data.message;
+
+                            // clear and close the current room 
+                            $(".room-name").text("");
+                            $(".chat-box").html("");
+                            $("#type-message-for-sending").val("");
+                            $(".chat-room-container").hide();
+
+                            // open the public room
+                            $(".join-in-public-room-container").show();
+                            $(".public-room-name").text(roomName);
+
+                            // check if the user is the room owner
+                            if (publicRoomData.creator !== username){
+                                // if the username is compared to the room creator, then show the owner bar
+                                $(".public-creator-authorization-bar").hide();
+                            }
+
+                        }else{
+                            $(".error-message").show();
+                            $(".error-message").text(data.message);
+                        }
+                    });
+                }
+                // private rooms
+                // send user id in the room
+                function joinPrivateRoom() {
+                    // show input password and cancle button
+                    $(".display-all-private-rooms").append($("<div class='join-private-control-bar'></div>"));
+                    $(".join-private-control-bar").append($("<input type='password' id='pswd-protected' class='private-room-pswd' placeholder='private room password' required>"));
+                    $(".join-private-control-bar").append($("<button type='submit' id='submit-protected-pswd'>Join this room</button>"));
+                    $(".join-private-control-bar").append($("<button type='submit' id='cancel-join-private'>Cancel</button>"));
+
+                    // obtain the public room name
+                    const roomName = $(this).text();
+                    username = $("h2 strong").text();
+                    console.log(username+" is joining in private room: "+roomName);
+                    
+                    // user insert pswd, and submit the pswd to get in the private room
+                    $("#submit-protected-pswd").on("click", function(event){
+                        const protectedPswd = $("#pswd-protected").val();
+                        // send to the serer
+                        socketio.emit("private_room_data", 
+                            {requesterName: username, openRoom: roomName, pswd: protectedPswd},
+                            (data) => {
+                                if (data.success) {
+                                    $(".error-message").text("");
+                                    $(".error-message").hide();
+                                    $(".join-private-control-bar").remove();
+
+                                    const privateRoomData = data.message;
+
+                                    // clear and close the current room 
+                                    $(".room-name").text("");
+                                    $(".chat-box").html("");
+                                    $("#type-message-for-sending").val("");
+                                    $(".chat-room-container").hide();
+
+                                    // open the private room
+                                    $(".join-in-private-room-container").show();
+                                    $(".private-room-name").text(roomName);
+
+
+                                    // check if the user is the room owner
+                                    if (privateRoomData.creator !== username){
+                                        // if the username is compared to the room creator, then show the owner bar
+                                        $(".private-creator-authorization-bar").hide();
+                                    }
+
+                                }else{
+                                    $(".join-private-control-bar").remove();
+                                    $(".error-message").show();
+                                    $(".error-message").text(data.message);
+                                }
+                        });
+                    })
+
+                    // user can cancel if they don not want to join
+                    $("#cancel-join-private").on("click", function(){
+                        $(".error-message").text("");
+                        $(".error-message").hide();
+                        $(".join-private-control-bar").remove();
+                    })
+                }
+                
+                // 3. The chat room displays all users currently in the room
+                // when open a new chat room container, it should shows all users
+                //    a: room name is stored in the server
+                //    b: user entered in the room, will associate with the room name
+                //    c: user leave the room, will remove the socketid to the room name
+                $("#show-all-available-users").on("click", function(){
+                    // room name
+                    const roomName = $(".room-name").text();
+                    username = $("h2 strong").text();
+                    console.log(username+" is showing all available users in the room: "+roomName);
+
+                    // send the roomname back to server to check how many users in the room
+                    socketio.emit("check_available_users", {requester: username, curRoom: roomName}, (data) => {
+                        if (data.success) {
+                            $(".error-message").text("");
+                            $(".error-message").hide();
+
+                            const allAvailableUsers = data['availableUsers'].trim().split(" "); // users: "user1 user2 user3"
+                            $(".available-chat-room-users").append($("<div class='available-users-in-the-room'></div>"));
+                            
+                            console.log("There are available users:"+allAvailableUsers);
+                            // if there is not users, then show no users
+                            if (allAvailableUsers.length === 0) {
+                                $(".available-users-in-the-room").text("No available users currently");
+                            } else {
+                    
+                                for (const user of allAvailableUsers) {
+                                    $(".available-users-in-the-room").append(`<button id='message-to-user-${user}'>${user}</button>`);
+                                    $(`#message-to-user-${user}`).on("click", sendPrivateMessage);
+                                }
+
+                                $(".available-users-in-the-room").append("<button id='cancel-available-users'>cancel</button>");
+                                $("#cancel-available-users").on("click", function() {
+                                    $(".available-users-in-the-room").remove();
+                                });
+
+                            }
+
+                        } else {
+                            console.log("unsuccessfully show the users");
+                            $(".error-message").show();
+                            $(".error-message").text(data.message);
+                        }
+                    });
+                });
+
+                $("#public-show-all-available-users").on("click", function(){
+                    // room name
+                    const roomName = $(".public-room-name").text();
+                    username = $("h2 strong").text();
+                    console.log(username+" is showing all available users in the room: "+roomName);
+
+                    // send the roomname back to server to check how many users in the room
+                    socketio.emit("check_available_users", {requester: username, curRoom: roomName}, (data) => {
+                        if (data.success) {
+                            $(".error-message").text("");
+                            $(".error-message").hide();
+
+                            const allAvailableUsers = data['availableUsers'].trim().split(" "); // users: [{name:, id:}, {}]
+                            $(".public-available-chat-room-users").append($("<div class='available-users-in-the-room'></div>"));
+                            
+                            console.log("There are available users:"+allAvailableUsers);
+                            // if there is not users, then show no users
+                            if (allAvailableUsers.length === 0) {
+                                $(".available-users-in-the-room").text("No available users currently");
+                            } else {
+                                for (const user of allAvailableUsers) {
+                                    $(".available-users-in-the-room").append(`<button id='message-to-user-${user}'>${user}</button>`);
+                                    $(`#message-to-user-${user}`).on("click", publicSendPrivateMessage);
+                                }
+
+                                $(".available-users-in-the-room").append("<button id='cancel-available-users'>cancel</button>");
+                                $("#cancel-available-users").on("click", function() {
+                                    $(".available-users-in-the-room").remove();
+                                });
+                            }
+
+                        } else {
+                            console.log("unsuccessfully show the users");
+                            $(".error-message").show();
+                            $(".error-message").text(data.message);
+                        }
+                    });
+                });
+                
+                $("#private-show-all-available-users").on("click", function(){
+                    // room name
+                    const roomName = $(".private-room-name").text();
+                    username = $("h2 strong").text();
+                    console.log(username+" is showing all available users in the room: "+roomName);
+
+                    // send the roomname back to server to check how many users in the room
+                    socketio.emit("check_available_users", {requester: username, curRoom: roomName}, (data) => {
+                        if (data.success) {
+                            $(".error-message").text("");
+                            $(".error-message").hide();
+
+                            const allAvailableUsers = data['availableUsers'].trim().split(" "); // users: [{name:, id:}, {}]
+                            $(".private-available-chat-room-users").append($("<div class='available-users-in-the-room'></div>"));
+                            
+                            console.log("There are available users:"+allAvailableUsers);
+                            // if there is not users, then show no users
+                            if (allAvailableUsers.length === 0) {
+                                $(".available-users-in-the-room").text("No available users currently");
+                            } else {
+                                for (const user of allAvailableUsers) {
+                                    $(".available-users-in-the-room").append(`<button id='message-to-user-${user}'>${user}</button>`);
+                                    $(`#message-to-user-${user}`).on("click", privateSendPrivateMessage);
+                                }
+                                $(".available-users-in-the-room").append("<button id='cancel-available-users'>cancel</button>");
+                                $("#cancel-available-users").on("click", function() {
+                                    $(".available-users-in-the-room").remove();
+                                });
+                            }
+                        } else {
+                            console.log("unsuccessfully show the users");
+                            $(".error-message").show();
+                            $(".error-message").text(data.message);
+                        }
+                    });
+                });
+                
+                // 5. Creators of chat rooms can temporarily kick others out of the room
+                $("#kick-off-user").on("click", function() {
+                    $(".creator-authorization-bar").append($("<div class='kick-off-who'>Kick: </div>"));
+                    $(".kick-off-who").append($("<input type='text' id='username-for-kick-off' placeholder='username' required>"));
+                    $(".kick-off-who").append($("<button type='submit' id='confirm-user-for-kick-off'>confirm</button>"));
+                    $(".kick-off-who").append($("<button type='submit' id='cancel-user-for-kick-off'>cancel</button>"));
+                    
+                    // room name
+                    const curRoom = $(".room-name").text();
+                    username = $("h2 strong").text();
+                    
+                    // users should type the one who wants to kick off
+                    $("#confirm-user-for-kick-off").on("click", function () {
+                        const kickedUser = $("#username-for-kick-off").val();
+                        console.log(username+" is kicking off "+kickedUser+" in the room: "+curRoom);
+
+                        socketio.emit("kick_off_user", 
+                        {requesterName: username, curRoomName: curRoom, kickedUserName: kickedUser}, 
+                        (data) => {
+                            if (data.success){
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+
+                                $(".kick-off-who").remove();
+
+                                $(".available-users-in-the-room").remove();
+                                console.log("successfully kicked off");
+                            } else {
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    });
+
+
+                    // users can cancel the event
+                    $("#cancel-user-for-kick-off").on("click", function () {
+                        $(".error-message").text("");
+                        $(".error-message").hide();
+                        $(".kick-off-who").remove();
+                    });
+
+                });
+
+                $("#public-kick-off-user").on("click", function() {
+                    $(".creator-authorization-bar").append($("<div class='kick-off-who'>Kick: </div>"));
+                    $(".kick-off-who").append($("<input type='text' id='username-for-kick-off' placeholder='username' required>"));
+                    $(".kick-off-who").append($("<button type='submit' id='confirm-user-for-kick-off'>confirm</button>"));
+                    $(".kick-off-who").append($("<button type='submit' id='cancel-user-for-kick-off'>cancel</button>"));
+                    
+                    // room name
+                    const curRoom = $(".public-room-name").text();
+                    username = $("h2 strong").text();
+                    console.log(username+" is kicking off sb in the room: "+curRoom);
+
+                    // users should type the one who wants to kick off
+                    $("#confirm-user-for-kick-off").on("click", function () {
+                        const kickedUser = $("#username-for-kick-off").val();
+
+                        socketio.emit("kick_off_user", 
+                        {requesterName: username, curRoomName: curRoom, kickedUserName: kickedUser}, 
+                        (data) => {
+                            if (data.success){
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+
+                                $(".kick-off-who").remove();
+                                $(".available-users-in-the-room").remove();
+                                console.log("successfully kicked off");
+                            } else {
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    });
+
+                    // users can cancel the event
+                    $("#cancel-user-for-kick-off").on("click", function () {
+                        $(".error-message").text("");
+                        $(".error-message").hide();
+                        $(".kick-off-who").remove();
+                    });
+
+                });
+
+                $("#private-kick-off-user").on("click", function() {
+                    $(".creator-authorization-bar").append($("<div class='kick-off-who'>Kick: </div>"));
+                    $(".kick-off-who").append($("<input type='text' id='username-for-kick-off' placeholder='username' required>"));
+                    $(".kick-off-who").append($("<button type='submit' id='confirm-user-for-kick-off'>confirm</button>"));
+                    $(".kick-off-who").append($("<button type='submit' id='cancel-user-for-kick-off'>cancel</button>"));
+                    
+                    // room name
+                    const curRoom = $(".private-room-name").text();
+                    username = $("h2 strong").text();
+                    console.log(username+" is kicking off sb in the room: "+curRoom);
+
+                    // users should type the one who wants to kick off
+                    $("#confirm-user-for-kick-off").on("click", function () {
+                        const kickedUser = $("#username-for-kick-off").val();
+
+                        socketio.emit("kick_off_user", 
+                        {requesterName: username, curRoomName: curRoom, kickedUserName: kickedUser}, 
+                        (data) => {
+                            if (data.success){
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+
+                                $(".kick-off-who").remove();
+                                $(".available-users-in-the-room").remove();
+
+                                console.log("successfully kicked off");
+                            } else {
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    });
+
+
+                    // users can cancel the event
+                    $("#cancel-user-for-kick-off").on("click", function () {
+                        $(".error-message").text("");
+                        $(".error-message").hide();
+                        $(".kick-off-who").remove();
+                    });
+
+                });
+                
+                // 6. Creators of chat rooms can permanently ban users from joining that particular room
+                // if the user is banned, then the user will be stored in the listofBans
+                // the banned user name associated with the room name
+                $("#ban-permanently").on("click", function(){
+                    $(".creator-authorization-bar").append($("<div class='ban-who'>Ban: </div>"));
+                    $(".ban-who").append($("<input type='text' id='username-for-ban' placeholder='username' required>"));
+                    $(".ban-who").append($("<button type='submit' id='confirm-user-for-ban'>confirm</button>"));
+                    $(".ban-who").append($("<button type='submit' id='cancel-user-for-ban'>cancel</button>"));
+                    
+                    // room name
+                    const curRoom = $(".room-name").text();
+                    username = $("h2 strong").text();
+                    console.log(username+" try to ban sb in the room: "+curRoom);
+
+                    // users should type the one who wants to ban
+                    $("#confirm-user-for-ban").on("click", function () {
+                        const bannedUser = $("#username-for-ban").val();
+
+                        socketio.emit("ban_user", 
+                        {requesterName: username, curRoomName: curRoom, bannedUserName: bannedUser}, 
+                        (data) => {
+                            if (data.success){
+                                // once user add into the banned list, updated all available users
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+
+                                $(".ban-who").remove();
+                                $(".available-users-in-the-room").remove();
+
+                                console.log("successfully ban");
+                            } else {
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    });
+
+
+                    // users can cancel the event
+                    $("#cancel-user-for-ban").on("click", function () {
+                        $(".error-message").text("");
+                        $(".error-message").hide();
+                        $(".ban-who").remove();
+                    });
+
+                });
+                
+                $("#public-ban-permanently").on("click", function(){
+                    $(".creator-authorization-bar").append($("<div class='ban-who'>Ban: </div>"));
+                    $(".ban-who").append($("<input type='text' id='username-for-ban' placeholder='username' required>"));
+                    $(".ban-who").append($("<button type='submit' id='confirm-user-for-ban'>confirm</button>"));
+                    $(".ban-who").append($("<button type='submit' id='cancel-user-for-ban'>cancel</button>"));
+                    
+                    // room name
+                    const curRoom = $(".public-room-name").text();
+                    username = $("h2 strong").text();
+                    console.log(username+" try to ban sb in the room: "+curRoom);
+
+                    // users should type the one who wants to ban
+                    $("#confirm-user-for-ban").on("click", function () {
+                        const bannedUser = $("#username-for-ban").val();
+
+                        socketio.emit("ban_user", 
+                        {requesterName: username, curRoomName: curRoom, bannedUserName: bannedUser}, 
+                        (data) => {
+                            if (data.success){
+                                // once user add into the banned list, updated all available users
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+
+                                $(".ban-who").remove();
+                                $(".available-users-in-the-room").remove();
+
+                                console.log("successfully ban");
+                            } else {
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    });
+
+
+                    // users can cancel the event
+                    $("#cancel-user-for-ban").on("click", function () {
+                        $(".error-message").text("");
+                        $(".error-message").hide();
+                        $(".ban-who").remove();
+                    });
+
+                });
+                
+                $("#private-ban-permanently").on("click", function(){
+                    $(".creator-authorization-bar").append($("<div class='ban-who'>Ban: </div>"));
+                    $(".ban-who").append($("<input type='text' id='username-for-ban' placeholder='username' required>"));
+                    $(".ban-who").append($("<button type='submit' id='confirm-user-for-ban'>confirm</button>"));
+                    $(".ban-who").append($("<button type='submit' id='cancel-user-for-ban'>cancel</button>"));
+                    
+                    // room name
+                    const curRoom = $(".private-room-name").text();
+                    username = $("h2 strong").text();
+                    console.log(username+" try to ban sb in the room: "+curRoom);
+
+                    // users should type the one who wants to ban
+                    $("#confirm-user-for-ban").on("click", function () {
+                        const bannedUser = $("#username-for-ban").val();
+
+                        socketio.emit("ban_user", 
+                        {requesterName: username, curRoomName: curRoom, bannedUserName: bannedUser}, 
+                        (data) => {
+                            if (data.success){
+                                // once user add into the banned list, updated all available users
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+                                $(".ban-who").remove();
+                                $(".available-users-in-the-room").remove();
+
+                                console.log("successfully ban");
+                            } else {
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    });
+
+
+                    // users can cancel the event
+                    $("#cancel-user-for-ban").on("click", function () {
+                        $(".error-message").text("");
+                        $(".error-message").hide();
+                        $(".ban-who").remove();
+                    });
+
+                });
+                
+                // kicked user / banned user will be removed from the room
+                // hide the current room container
+                socketio.on("check_ban_room", function(data) {
+                    // current username
+                    username = $("h2 strong").text();
+                    // get the room name
+                    const curRoom = $(".room-name").text();
+                    const publicRoom = $(".public-room-name").text();
+                    const privateRoom = $(".private-room-name").text();
+
+                    // find the banned room name  
+                    console.log(data.banner + " : "+ data.roomname);
+                    // find the user's banned room name 
+                    if (data.banner === username) {
+                        if (data.roomname === curRoom) {
+                            // clear data
+                            $(".room-name").text("");
+                            $(".chat-box").html("");
+                            $("#type-message-for-sending").val('');
+                            $(".chat-room-container").hide();
+                        } 
+                        if (data.roomname === publicRoom) {
+                            // clear data
+                            $(".public-room-name").text("");
+                            $(".public-chat-box").html("");
+                            $("#public-type-message-for-sending").val('');
+                            $(".join-in-public-room-container").hide();
+                        }
+                        if (data.roomname === privateRoom) {
+                            // clear data
+                            $(".private-room-name").text("");
+                            $(".private-chat-box").html("");
+                            $("#private-type-message-for-sending").val('');
+                            $(".join-in-private-room-container").hide();
+                        }
+                    }
+                    
+                    
+                });
+
+                socketio.on("check_kicked_room", function(data) {
+                    // current username
+                    username = $("h2 strong").text();
+                    // get the room name
+                    const curRoom = $(".room-name").text();
+                    const publicRoom = $(".public-room-name").text();
+                    const privateRoom = $(".private-room-name").text();
+
+                    const roomName = data.roomname;
+                    const roomUsers = data['users'].trim().split(" ");
+
+                    let ifKicked = true;
+                    // find the room name user not in already 
+                    if (curRoom === roomName) {
+                        // check if the user in or not in the room
+                        for (const usr of roomUsers) {
+                            // if in the room
+                            if (username === usr) {
+                                ifKicked = false;
+                            }
+                        }
+                    }
+
+                    let ifPublicKicked = true;
+                    if (publicRoom === roomName) {
+                        // check if the user in or not in the room
+                        for (const usr of roomUsers) {
+                            // if in the room
+                            if (username === usr) {
+                                ifPublicKicked = false;
+                            }
+                        }
+                    }
+
+                    let ifPrivateKicked = true;
+                    if (privateRoom === roomName) {
+                        // check if the user in or not in the room
+                        for (const usr of roomUsers) {
+                            // if in the room
+                            if (username === usr) {
+                                ifPrivateKicked = false;
+                            }
+                        }
+                    }
+                    
+                    console.log(ifKicked + " | " + ifPublicKicked + " | " + ifPrivateKicked + " | ");
+                    if (ifKicked || ifPublicKicked || ifPrivateKicked) {
+                        $(".room-name").text("");
+                        $(".chat-box").html("");
+                        $("#type-message-for-sending").val('');
+                        $(".chat-room-container").hide();
+                        $(".public-room-name").text("");
+                        $(".public-chat-box").html("");
+                        $("#public-type-message-for-sending").val('');
+                        $(".join-in-public-room-container").hide();
+                        $(".private-room-name").text("");
+                        $(".private-chat-box").html("");
+                        $("#private-type-message-for-sending").val('');
+                        $(".join-in-private-room-container").hide();
+                    }
+                });
+               
+                /***********************************************\
+                 *                                             *
+                 *                                             *
+                 *                  Messaging                  *
+                 *                                             *
+                 *                                             *
+                 \**********************************************/
+
+                // 1. A user's message shows their username and is sent to everyone in the room
+                // send the message to everyone in the room
+                // send the message to the server, and server emit the message to anyone in the room
+                $("#send-message-to-server").on("click", function(){
+                    // room name
+                    const curRoom = $(".room-name").text();
+                    // user name
+                    username = $("h2 strong").text();
+                    // message
+                    const chats = $("#type-message-for-sending").val();
+
+                    console.log(username+" try to send sb message in the room: "+curRoom);
+
+                    socketio.emit("send_message_to_server", 
+                        {requesterName: username, curRoomName: curRoom, messageData: chats},
+                        (data) => {
+                            if (data.success){
+                                $(".error-message").text("");
+                                $(".error-message").hide();                                
+                            } else {
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    
+                    // clear input fields
+                    $("#type-message-for-sending").val("");
+                });
+                
+                $("#public-send-message-to-server").on("click", function(){
+                    // room name
+                    const curRoom = $(".public-room-name").text();
+                    // user name
+                    username = $("h2 strong").text();
+                    // message
+                    const chats = $("#public-type-message-for-sending").val();
+
+                    console.log(username+" try to send sb message in the room: "+curRoom);
+
+                    socketio.emit("send_message_to_server", 
+                        {requesterName: username, curRoomName: curRoom, messageData: chats},
+                        (data) => {
+                            if (data.success){
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+                            } else {
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    
+                    // clear input fields
+                    $("#public-type-message-for-sending").val("");
+                });
+                
+                $("#private-send-message-to-server").on("click", function(){
+                    // room name
+                    const curRoom = $(".private-room-name").text();
+                    // user name
+                    username = $("h2 strong").text();
+                    // message
+                    const chats = $("#private-type-message-for-sending").val();
+
+                    console.log(username+" try to send sb message in the room: "+curRoom);
+
+                    socketio.emit("send_message_to_server", 
+                        {requesterName: username, curRoomName: curRoom, messageData: chats},
+                        (data) => {
+                            if (data.success){
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+
+                            } else {
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    
+                    // clear input fields
+                    $("#private-type-message-for-sending").val("");
+                });
+                
+                // clear button
+                $("#clear-type-box-messages").on("click", function(){
+                    $("#type-message-for-sending").val('');
+                });
+
+                $("#public-clear-type-box-messages").on("click", function (){
+                    $("#public-type-message-for-sending").val('');
+                });
+
+                $("#private-clear-type-box-messages").on("click", function (){
+                    $("#private-type-message-for-sending").val("");
+                });
+                
+                // keep receving messages from server
+                // then post messages to all relative container
+                socketio.on("send_message_to_client",function(data) {
+                    // room name
+                    const roomname = data["message"].room;
+                    // user who send the message
+                    const sender = data["message"].content.username;
+                    // what user says
+                    const chat = data["message"].content.message;
+
+                    // if the room name is same, then post the message on the room
+                    const curRoom = $(".room-name").text();
+                    if (curRoom === roomname) {
+                        $(".chat-box").append($(`<p><strong>${sender}: </strong>${chat}</p>`));
+                    }
+                    // public room 
+                    const publicRoom = $(".public-room-name").text();
+                    if (publicRoom === roomname) {
+                        $(".public-chat-box").append($(`<p><strong>${sender}: </strong>${chat}</p>`));
+                    }
+                    // private room
+                    const privateRoom = $(".private-room-name").text();
+                    if (privateRoom === roomname) {
+                        $(".private-chat-box").append($(`<p><strong>${sender}: </strong>${chat}</p>`));
+                    }
+                });
+                
+                // 2. Users can send private messages to another user in the same room
+                function sendPrivateMessage() {
+                    username = $("h2 strong").text();
+                    const receiver = $(this).text();
+                    // 1. create elements
+                    $("<div class='send-private-message-container'>Message to:</div>").appendTo(".available-chat-room-users");
+                    // within the container, there is a input elem
+                    $("<input type='text' id='typing-send-private-message' required>").appendTo(".send-private-message-container");
+                    // there is a submit elem
+                    $("<button type='submit' id='send-private-message-submit-btn'>send</button>").appendTo(".send-private-message-container");
+                    // there is a clear elem
+                    $("<button type='submit' id='send-private-message-clear-btn'>clear</button>").appendTo(".send-private-message-container");
+                    // there is a cancle elem
+                    $("<button type='submit' id='send-private-message-cancel-btn'>cancel</button>").appendTo(".send-private-message-container");
+
+                    // 2. submit events 
+                    $("#send-private-message-submit-btn").on("click", function(){
+                        // input text data
+                        const privateMessage = $("#typing-send-private-message").val();
+                        console.log(username + " is sending a private message: "+ privateMessage + " to: "+receiver);
+
+                        socketio.emit("send_private_message_to_server", 
+                        {sender: username, getter: receiver, chat: privateMessage},
+                        (data) => {
+                            if (data.success){
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+
+                                // clear input fields
+                                $("#typing-send-private-message").val('');
+                            }else{
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    })
+
+                    // 3. clear event
+                    $("#send-private-message-clear-btn").on("click", function(){
+                        // clear the typing input fields
+                        $("#typing-send-private-message").val('');
+                    });
+
+                    // 4. cancel event
+                    $("#send-private-message-cancel-btn").on("click", function (){
+                        // remove the container element
+                        $(".send-private-message-container").remove();
+                    })
+
+                }
+                
+                // publicSendPrivateMessage
+                function publicSendPrivateMessage() {
+                    username = $("h2 strong").text();
+                    const receiver = $(this).text();
+                    // 1. create elements
+                    $("<div class='send-private-message-container'>Message to:</div>").appendTo(".public-available-chat-room-users");
+                    // within the container, there is a input elem
+                    $("<input type='text' id='typing-send-private-message' required>").appendTo(".send-private-message-container");
+                    // there is a submit elem
+                    $("<button type='submit' id='send-private-message-submit-btn'>send</button>").appendTo(".send-private-message-container");
+                    // there is a clear elem
+                    $("<button type='submit' id='send-private-message-clear-btn'>clear</button>").appendTo(".send-private-message-container");
+                    // there is a cancle elem
+                    $("<button type='submit' id='send-private-message-cancel-btn'>cancel</button>").appendTo(".send-private-message-container");
+
+                    // 2. submit events 
+                    $("#send-private-message-submit-btn").on("click", function(){
+                        // input text data
+                        const privateMessage = $("#typing-send-private-message").val();
+                        console.log(username + " is sending a private message: "+ privateMessage + " to: "+receiver);
+
+                        socketio.emit("send_private_message_to_server", 
+                        {sender: username, getter: receiver, chat: privateMessage},
+                        (data) => {
+                            if (data.success){
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+
+                                // clear input fields
+                                $("#typing-send-private-message").val('');
+                            }else{
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    })
+
+                    // 3. clear event
+                    $("#send-private-message-clear-btn").on("click", function(){
+                        // clear the typing input fields
+                        $("#typing-send-private-message").val('');
+                    });
+
+                    // 4. cancel event
+                    $("#send-private-message-cancel-btn").on("click", function (){
+                        // remove the container element
+                        $(".send-private-message-container").remove();
+                    })
+
+                }
+                
+                // privateSendPrivateMessage
+                function privateSendPrivateMessage() {
+                    username = $("h2 strong").text();
+                    const receiver = $(this).text();
+                    // 1. create elements
+                    $("<div class='send-private-message-container'>Message to:</div>").appendTo(".private-available-chat-room-users");
+                    // within the container, there is a input elem
+                    $("<input type='text' id='typing-send-private-message' required>").appendTo(".send-private-message-container");
+                    // there is a submit elem
+                    $("<button type='submit' id='send-private-message-submit-btn'>send</button>").appendTo(".send-private-message-container");
+                    // there is a clear elem
+                    $("<button type='submit' id='send-private-message-clear-btn'>clear</button>").appendTo(".send-private-message-container");
+                    // there is a cancle elem
+                    $("<button type='submit' id='send-private-message-cancel-btn'>cancel</button>").appendTo(".send-private-message-container");
+
+                    // 2. submit events 
+                    $("#send-private-message-submit-btn").on("click", function(){
+                        // input text data
+                        const privateMessage = $("#typing-send-private-message").val();
+                        console.log(username + " is sending a private message: "+ privateMessage + " to: " + receiver);
+
+                        socketio.emit("send_private_message_to_server", 
+                        {sender: username, getter: receiver, chat: privateMessage},
+                        (data) => {
+                            if (data.success){
+                                $(".error-message").text("");
+                                $(".error-message").hide();
+
+                                // clear input fields
+                                $("#typing-send-private-message").val('');
+                            }else{
+                                $(".error-message").show();
+                                $(".error-message").text(data.message); 
+                            }
+                        });
+                    })
+
+                    // 3. clear event
+                    $("#send-private-message-clear-btn").on("click", function(){
+                        // clear the typing input fields
+                        $("#typing-send-private-message").val('');
+                    });
+
+                    // 4. cancel event
+                    $("#send-private-message-cancel-btn").on("click", function (){
+                        // remove the container element
+                        $(".send-private-message-container").remove();
+                    })
+
+                }
+                
+                // receive private message - cur room 
+                socketio.on("send_private_message_to_client", function(data){
+                    // user who send the message
+                    const sender = data.user;
+                    // user who receive the messages
+                    const receiver = data.getter;
+                    // what user says
+                    const chat = data.chat;
+                    console.log(sender+" is sending message "+chat+" to "+receiver);
+                    username = $("h2 strong").text();
+                    if (username === receiver){
+                        $(".receive-a-private-message-container").show();
+                        $(".receive-a-private-message-container").append($("<div class='receive-a-private-message-box'></div>"));
+                        $(`<p>${sender}: ${chat}</p>`).appendTo(".receive-a-private-message-box");
+                        $("<button id='delete-private-message'>delete</button>").appendTo(".receive-a-private-message-box");
+                        $("#delete-private-message").on("click", function(){
+                            $(".receive-a-private-message-box").remove();
+                            $(".receive-a-private-message-container").hide();
+                        });
+                    }
+                });
+        
+            
+            });
+
+        </script>
+    </head>
+
+    <body>
+      <!-- initialize the chat server: start at having a nickname -->
+      <div class="initialize-chat-server" id="initialize-chat-server">
+         <label for="username">Choose a nickname to login: </label>
+         <input type="text" id="username" class="login-page" placeholder="username" required>
+         <button type="submit" id="login" class="login-page">Chat Now</button>
+      </div>
+      <div class="error-message" id="error-message">
+      </div>
+      <!-- after login: users can see all functions -->
+      <div class="main-page">
+            <h2>Welcome to Multi-Chat Server, </h2>
+
+            <hr>
+            <!-- put all functions on the main page header -->
+            <div class="functions-container">
+                <!-- users can create chat rooms with a room name -->
+                <button type="submit" id="create-chat-room">Create Room</button>
+                <!-- users can see all available rooms and join in arbitrary room -->
+                <button type="submit" id="display-all-rooms-btn">Display Rooms</button>
+                <!-- users can log out the chat server -->
+                <!-- <button type="submit" id="logout-page">Logout</button> -->
+
+            </div>
+            <hr>
+
+            <!-- it will show up when user wants to create a chat room -->
+            <div class="create-chat-room-container">
+                <h4 class="create-new-room">Create a new room</h4>
+                <label for="new-room-name">Name: </label>
+                <input type="text" id="new-room-name" class="create-new-room" placeholder="give a room name" required>
+                
+                <div class="new-room-category">
+                    <label>Want to create a private room?</label>
+                    <input type="radio" id="create-private" name="create-private-room" class="create-private-room-radio" value="true">
+                    <label for="create-private">Yes</label>
+
+                    <input type="radio" id="not-create-private" name="create-private-room" class="create-private-room-radio" value="false" checked>
+                    <label for="not-create-private">No</label>
+                </div>
+
+                <!-- if there is a yes above, then show it needs a password -->
+                <div class="new-room-password">
+                    <label for="create-password">Password: </label>
+                    <input type="password" id="create-password" class="new-room-password" placeholder="private room password" required>
+                </div>
+                
+                <!-- create the new room -->
+                <button type="submit" id="create-new-room-btn" class="create--room-btn">create</button>
+                <button type="submit" id="cancel-new-room-btn" class="create--room-btn">cancel</button>
+            </div>
+
+            <!-- user can use it to check the available room for joining -->
+            <div class="display-all-rooms">
+                <input type="radio" id="show-public" name="all-rooms" value="public" checked>
+                <label for="show-public">Public</label>
+                <input type="radio" id="show-private" name="all-rooms" value="private">
+                <label for="show-private">Private</label>
+                <!-- use radio button to control show which kind of rooms -->
+                <p>Prompt: Find a room name, click it to join in the room</p>
+                <div class="display-all-public-rooms"></div>
+                <div class="display-all-private-rooms"></div>
+                
+                <button type="submit" id="cancel-display-all-rooms">cancel</button>
+            </div>
+
+            <!-- when someone send you the message, it will show here -->
+            <div class="receive-a-private-message-container">
+                <h4>You Got a Private Message:</h4>
+            </div>
+
+            <!-- create room successfully, open a new chat room -->
+            <div class="chat-room-container">
+                <h6>******** ROOM ********</h6>
+                <p class="room-name"></p>
+
+                <!-- show all available users in this room -->
+                <div class="available-chat-room-users">
+                    <button type="submit" id="show-all-available-users">All Available Users</button>
+                    <!-- user can send chat messages to other users in this room -->
+                </div>
+
+                <!-- only creator can see this functions -->
+                <div class="creator-authorization-bar">
+                    <button type="submit" id="kick-off-user">kick off</button>
+                    <button type="submit" id="ban-permanently">ban forever</button>
+                </div>
+
+                <!-- messages show on the chat box -->
+                <div class="chat-box">
+                </div>
+
+                <div class="message-control-box">
+                    <input type="text" id="type-message-for-sending" required>
+                    <button type="submit" id="send-message-to-server">send</button>
+                    <button type="submit" id="clear-type-box-messages">clear</button>
+                </div>
+            </div>
+
+            <!-- user join in a public room, open this container -->
+            <div class="join-in-public-room-container">
+                <h6>******** ROOM ********</h6>
+                <p class="public-room-name"></p>
+
+                <!-- show all available users in this room -->
+                <div class="public-available-chat-room-users">
+                    <button type="submit" id="public-show-all-available-users">All Available Users</button>
+                    <!-- user can send chat messages to other users in this room -->
+                </div>
+
+                <!-- only creator can see this functions -->
+                <div class="public-creator-authorization-bar">
+                    <button type="submit" id="public-kick-off-user">kick off</button>
+                    <button type="submit" id="public-ban-permanently">ban forever</button>
+                </div>
+
+                <div class="public-chat-box">
+                </div>
+
+                <div class="public-message-control-box">
+                    <input type="text" id="public-type-message-for-sending" required>
+                    <button type="submit" id="public-send-message-to-server">send</button>
+                    <button type="submit" id="public-clear-type-box-messages">clear</button>
+                </div>
+            </div>
+
+            <!-- user join in a private room, open this container -->
+            <div class="join-in-private-room-container">
+                <h6>******** ROOM ********</h6>
+                <p class="private-room-name"></p>
+
+                <!-- show all available users in this room -->
+                <div class="private-available-chat-room-users">
+                    <button type="submit" id="private-show-all-available-users">All Available Users</button>
+                    <!-- user can send chat messages to other users in this room -->
+                </div>
+
+                <!-- only creator can see this functions -->
+                <div class="private-creator-authorization-bar">
+                    <button type="submit" id="private-kick-off-user">kick off</button>
+                    <button type="submit" id="private-ban-permanently">ban forever</button>
+                </div>
+
+                <div class="private-chat-box">
+                </div>
+
+                <div class="private-message-control-box">
+                    <input type="text" id="private-type-message-for-sending" required>
+                    <button type="submit" id="private-send-message-to-server">send</button>
+                    <button type="submit" id="private-clear-type-box-messages">clear</button>
+                </div>
+            </div>
+      </div>
+    </body>
+</html>
